@@ -9,6 +9,7 @@ dependencies = [
     "crewai[google-genai]>=1.6.0",
     "faiss-cpu>=1.13.0",
     "fastapi[standard]>=0.122.0",
+    "googlemaps>=4.10.0",
     "hf-xet>=1.2.0",
     "huggingface>=0.0.1",
     "langchain>=1.1.0",

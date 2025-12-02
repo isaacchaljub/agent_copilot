@@ -16,6 +16,7 @@ dependencies = [
     { name = "crewai-tools" },
     { name = "faiss-cpu" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "googlemaps" },
     { name = "hf-xet" },
     { name = "huggingface" },
     { name = "langchain" },
@@ -40,6 +41,7 @@ requires-dist = [
     { name = "crewai-tools", specifier = ">=1.6.0" },
     { name = "faiss-cpu", specifier = ">=1.13.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.122.0" },
+    { name = "googlemaps", specifier = ">=4.10.0" },
     { name = "hf-xet", specifier = ">=1.2.0" },
     { name = "huggingface", specifier = ">=0.0.1" },
     { name = "langchain", specifier = ">=1.1.0" },
@@ -1373,6 +1375,15 @@ wheels = [
 grpc = [
     { name = "grpcio" },
 ]
+
+[[package]]
+name = "googlemaps"
+version = "4.10.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fe/26/bca4d737a9acea25e94c19940a780bbf0be64a691f7caf3a68467d3a5838/googlemaps-4.10.0.tar.gz", hash = "sha256:3055fcbb1aa262a9159b589b5e6af762b10e80634ae11c59495bd44867e47d88", size = 33056, upload-time = "2023-01-26T16:45:02.501Z" }
 
 [[package]]
 name = "greenlet"
