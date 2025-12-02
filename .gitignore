@@ -12,3 +12,6 @@
 *.pyo
 *.pyd
 .Python
+
+#Email credentials
+credentials.json

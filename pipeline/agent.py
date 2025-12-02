@@ -18,6 +18,8 @@ import numpy as np
 import googlemaps
 from googlemaps.places import find_place, places_nearby
 import requests
+from langchain_google_community import GmailToolkit
+from langchain_google_community.gmail.utils import build_resource_service, get_gmail_credentials
 
 # Load the environment variables
 load_dotenv()
@@ -27,10 +29,14 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 SERPER_API_KEY = os.getenv("SERPER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("MAPS_API_KEY")
 
+#Initialize the Gmail Toolkit
+gmail_toolkit=GmailToolkit()
+email_tools=gmail_toolkit.get_tools()
+
 # Define global variables
 cache=[]
 cache_size=20
-similarity_threshold=0.85
+similarity_threshold=0.9
 global_embeddings=HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 maps=googlemaps.Client(key=GOOGLE_MAPS_API_KEY)
 
@@ -58,8 +64,7 @@ agent_llm = ChatLiteLLM(
 class AgentState(TypedDict):
     query: str
     cache_hit:bool
-    is_cache_good:bool
-    final_answer: str
+    answer: str
     agent: str
     need_more_info: bool
     more_info_query: str
@@ -92,45 +97,117 @@ def check_cache(state: AgentState) -> AgentState:
     return {**state, "cache_hit": False}
 
 
-#Define function to define tools
+#Define function to choose the agent to use
 def define_agent(state: AgentState) -> AgentState:
-    """Use LLM to define agent"""
+    """Use LLM to choose the agent to use"""
     query = state["query"]
     
-    prompt = '''Role: AI Agent Definition Assistant
-Task: Define the agent for the user's question.
+    prompt = '''Role: AI Agent Choice Assistant
+Task: Choose the agent for the user's question.
 Instructions:
     - Analyze the user's question and identify the agent that is needed to answer the question.
     - Provide a clear and concise response indicating the agent that is needed to answer the question.
-    - Your response should include only the agent that is needed to answer the question. Nothing else, no other text, information, header/footer. 
+    - Your response should include only the agent that is needed to answer the question. Nothing else, no other text, information, header/footer.
     - The agents available are:
-        - find_places_nearby: to find places nearby
-        - web_search: to search and scrape the web
-        - mail_sender: to send an email
+        - find_places: to find places nearby
+        - search_web: to search and scrape the web
+        - send_email: to send an email
 Output Format:
     - agent: name of the agent
 Examples:
     Input: 
         User Query: Find me bars that are close to Calle de Clara del Rey, 5, in Madrid, Spain.
     Expected Output:
-        agent: places_finder
+        agent: find_places
     Input: 
         User Query: What is the population of China?
     Expected Output:
-        agent: web_searcher
+        agent: search_web
     Input: 
         User Query: Send an email to John Doe with the subject "Meeting" and the body "We need to discuss the project".
     Expected Output:
-        agent: email_sender
+        agent: send_email
     Input:
         User Query: {query}
-        agent: {agent}
 '''
     formatted_prompt = prompt.format(query=query)
     response = tool_llm.invoke(formatted_prompt)
     agent = response.content.strip().lower()
     return {**state, "agent": agent}
 
+
+#Define a function to revew if the query has enough information to answer and fix it
+def review_query(state: AgentState) -> AgentState:
+    """Review if the query has enough information to answer"""
+    query=state["query"]
+
+    prompt = '''Role: You are a helpful AI Query Reviewer that determines if the user's query has enough information to answer it.
+Task: Determine if the user's query has enough information to answer.
+Instructions:
+    - Read the user's query and identify if it is clear and has enough information to answer.
+    - Provide a clear and concise response indicating whether the query has all the needed information or not.
+    - Provide a brief explanation of what information is missing.
+    - Your response should include only the answer. Nothing else, no other text, information, header/footer.
+    - If the query has enough information to answer, provide the answer as "Yes" and don't provide an explanation.
+    - If the query doesn't have enough information to answer, provide the answer as "No" and provide a brief explanation of what information is missing.
+Output Format:
+    - answer: Yes/No
+    - explanation: brief explanation of what information is missing
+Examples:
+    Input:
+        User Query: Find me bars that are close to Calle de Clara del Rey, 5.
+    Expected Output:
+        answer: No
+        explanation: The query is missing the city and country.
+    Input:
+        User Query: Find me bars that are close to Calle de Clara del Rey, 5, in Madrid, Spain.
+    Expected Output:
+        answer: Yes
+    Input: 
+        User Query: What is the population of China?
+    Expected Output:
+        answer: Yes
+    Input:
+        User Query: What is the altitude of Colombia?
+    Expected Output:
+        answer: No
+        explanation: The query is missing the city to search for.
+    Input: 
+        User Query: Send an email to John Doe with the subject "Meeting" and the body "We need to discuss the project".
+    Expected Output:
+        answer: No
+        explanation: The query is missing the recipient email.
+    Input:
+        User Query: Send an email to devtestchal@gmail.com with the subject "Meeting" and the body "We need to discuss the project".
+    Expected Output:
+        answer: Yes
+    Input:
+        User Query: {query}
+'''
+    formatted_prompt = prompt.format(query=query)
+    response = tool_llm.invoke(formatted_prompt)
+    answer = response.content.strip().lower()
+    
+    is_enough_info = response.get("answer")
+
+    if is_enough_info=="No":
+        return {**state, "need_more_info": True, "more_info_query": response.get("explanation")}
+    else:
+        return {**state, "need_more_info": False}
+
+
+#Define function to ask for more information
+def ask_for_more_info(state: AgentState) -> AgentState:
+    """Ask for more information"""
+    query=state["query"]
+    more_info_query=state["more_info_query"]
+
+    # print(f"Please provide the following information to answer the question: {more_info_query}")
+
+    additional_info=input("Please provide the following information to answer the question: {more_info_query}")
+
+    state["query"]=f"{query} {additional_info}"
+    return state
 
 #Place finder function
 @tool
@@ -265,87 +342,71 @@ def search_web(state: AgentState) -> AgentState:
     return {**state, "answer": answer}
 
 
+#Email sender agent
+def get_email_agent():
+    'Create a email sender agent using Langchain and the Gmail Toolkit'
+    email_agent = create_agent(
+        llm=agent_llm, 
+        tools=[email_tools],
+        system_prompt='''
+        You are an expert Email Assistant.
+        Your primary job is to send emails based on the user's instructions.
+        
+        Important Instructions:
+        1. Always create a draft first if the user asks to "draft" an email.
+        2. Use the `send_message` tool if the user explicitly asks to SEND.
+        3. If the user provides a recipient (to), subject, and body, use them exactly.''')
+
+    return email_agent
+
+#Initialize the email agent
+email_agent_executor=get_email_agent()
+
+#Define function to send email  
+def send_email(state: AgentState) -> AgentState:
+    """Send an email using LangChain agent"""
+
+    #Get the query
+    query=state["query"]
+
+    #Get the email agent
+    agent=email_agent_executor
+
+    # Create a message from the query
+    user_message = HumanMessage(
+        content=f"Send an email according to the user's instructions: {query}"
+    )
+
+    # Invoke the agent with messages
+    result=agent.invoke({"messages": [user_message]})
+
+    # Extract the answer from the result
+    messages=result.get("messages", [])
+    if messages:
+        last_message=messages[-1]
+        answer=last_message.content if hasattr(last_message, 'content') else str(last_message)
+    else:
+        answer="No response from email agent"
+    
+    return {**state, "answer": answer}
 
 
+#Define the graph
+def create_graph():
+    """Create the agentic pipeline graph"""
+    workflow=StateGraph(AgentState)
 
+    #Add nodes to the graph
+    workflow.add_node("Check Cache", check_cache)
+    workflow.add_node("Review Query", review_query)
+    workflow.add_node("Ask for More Info", ask_for_more_info)
+    workflow.add_node("Define Agent", define_agent)
+    workflow.add_node("Find Places Nearby", find_places_nearby)
+    workflow.add_node("Search Web", search_web)
+    workflow.add_node("Send Email", send_email)
 
+    #Set the entry point
+    workflow.set_entry_point("Check Cache")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#     prompt = '''Role: AI Agent to use googlemaps Places Nearby Tool
-# Task: Extract the address and places to search for from the user's query.
-# Instructions:
-#     - Read the user's query and determine the location and places to search for.
-#     - Extract the address from the user's query
-#     - Extract the places to search for from the user's query
-# Output Format:
-#     - address: address of the location
-#     - places: places to search for
-# Examples:
-#     Input: 
-#         User Query: Find me bars that are close to Calle de Clara del Rey, 5, in Madrid, Spain.
-#     Expected Output:
-#         address: Calle de Clara del Rey, 5, Madrid, Spain
-#         places: bars
-#     Input: 
-#         User Query: Find me restaurants that are close to Calle Hermosilla, 87, in Madrid, Spain.
-#     Expected Output:
-#         address: Calle Hermosilla, 87, Madrid, Spain
-#         places: restaurants
-#     Input: 
-#         User Query: Find me hotels that are close to Carrera 7 #16-50, in Pereira, Colombia.
-#     Expected Output:
-#         address: Carrera 7 #16-50, Pereira, Colombia
-#         places: hotels
-#     Input: 
-#         User Query: {query}
-#     Expected Output:
-#         address: {address}
-#         places: {places}
-#     '''
+    #Add Edges to the graph
+    workflow.add_conditional_edges("Check Cache", {True: END, False: "Review Query"})
