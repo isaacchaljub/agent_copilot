@@ -68,7 +68,7 @@ class AgentState(TypedDict):
     agent: str
     need_more_info: bool
     more_info_query: str
-    more_info_answer: str
+
 
 # Define function to check cosine similarity
 def cosine_similarity(query_embedding, cached_embedding):
@@ -188,13 +188,14 @@ Examples:
     response = tool_llm.invoke(formatted_prompt)
     answer = response.content.strip().lower()
     
-    is_enough_info = response.get("answer")
+    is_enough_info = answer.get("answer")
+    explanation = answer.get("explanation")
 
     if is_enough_info=="No":
-        return {**state, "need_more_info": True, "more_info_query": response.get("explanation")}
+        return {**state, "need_more_info": True, "more_info_query": explanation}
     else:
         return {**state, "need_more_info": False}
-
+    
 
 #Define function to ask for more information
 def ask_for_more_info(state: AgentState) -> AgentState:
@@ -347,7 +348,7 @@ def get_email_agent():
     'Create a email sender agent using Langchain and the Gmail Toolkit'
     email_agent = create_agent(
         llm=agent_llm, 
-        tools=[email_tools],
+        tools=email_tools,
         system_prompt='''
         You are an expert Email Assistant.
         Your primary job is to send emails based on the user's instructions.
@@ -409,4 +410,49 @@ def create_graph():
     workflow.set_entry_point("Check Cache")
 
     #Add Edges to the graph
-    workflow.add_conditional_edges("Check Cache", {True: END, False: "Review Query"})
+    workflow.add_conditional_edges("Check Cache", lambda state: END if state.get("cache_hit", False) else "Review Query")
+    workflow.add_conditional_edges("Review Query", lambda state: "Ask for More Info" if state.get("need_more_info", False) else "Define Agent")
+    workflow.add_edges("Ask for More Info", "Review Query")
+    workflow.add_conditional_edges("Define Agent", lambda state: "Find Places Nearby" if state.get("agent", "") == "find_places" else "Search Web" if state.get("agent", "") == "search_web" else "Send Email" if state.get("agent", "") == "send_email" else END)
+    workflow.add_edges("Find Places Nearby", END)
+    workflow.add_edges("Search Web", END)
+    workflow.add_edges("Send Email", END)
+
+    #Compile the graph
+    app=workflow.compile()
+
+    return app
+
+#Initialize the graph once at startup
+_graph=create_graph()
+
+#Define the function to run the graph
+def process_query(query: str) -> str:
+    """Process the query through the graph"""
+
+    #Deifne the initial state
+    initial_state={
+        "query": query,
+        "cache_hit": False,
+        "answer": "",
+        "agent": "",
+        "need_more_info": False,
+        "more_info_query": ""
+    }
+
+    #Run the graph
+    result=_graph.invoke(initial_state)
+
+    return result.get("answer", "")
+
+#Define main to test the pipeline
+def main():
+    """Main function to test the pipeline"""
+
+    query=input("Enter a query to process: ")
+    result=process_query(query)
+
+    print(f"Answer: {result}")
+
+if __name__ == "__main__":
+    main()
