@@ -15,3 +15,7 @@
 
 #Email credentials
 credentials.json
+token.json
+
+INTERRUPTS_EXPLANATION.md
+FIX_GEMINI_API_KEY.md
