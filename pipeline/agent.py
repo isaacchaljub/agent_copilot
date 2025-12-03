@@ -239,7 +239,6 @@ def ask_for_more_info(state: AgentState) -> AgentState:
     """Ask for more information"""
     more_info_query=state["more_info_query"]
 
-    # print(f"Please provide the following information to answer the question: {more_info_query}")
     user_response = interrupt(more_info_query)
     current_query = state["query"]
     updated_query = f"{current_query}. User provided details: {user_response}"
@@ -305,6 +304,9 @@ def places_finder_agent():
     )
     return places_finder_agent
 
+#Initialize the places finder agent
+places_agent = places_finder_agent()
+
 #Define function to find places nearby
 def find_places_nearby(state: AgentState) -> AgentState:
     """Find places nearby"""
@@ -314,7 +316,7 @@ def find_places_nearby(state: AgentState) -> AgentState:
             return {**state, "answer": "Error: No query provided"}
 
         #Get the agent
-        agent = places_finder_agent()
+        agent = places_agent
 
         # Create a message from the query
         user_message = HumanMessage(
@@ -413,6 +415,8 @@ def get_email_agent():
 
     return email_agent
 
+#Initialize the email agent
+email_agent = get_email_agent()
 
 #Define function to send email  
 def send_email(state: AgentState) -> AgentState:
@@ -424,7 +428,7 @@ def send_email(state: AgentState) -> AgentState:
             return {**state, "answer": "Error: No query provided"}
 
         #Get the email agent
-        agent = get_email_agent()
+        agent = email_agent
 
         # Create a message from the query
         user_message = HumanMessage(
